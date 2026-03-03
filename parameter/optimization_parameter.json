@@ -1,0 +1,6 @@
+{
+    "random_seed": 2025,
+    "no_trials": 50,
+    "window_size": [10, 50],
+    "threshold": [1.0, 3.0]
+}
