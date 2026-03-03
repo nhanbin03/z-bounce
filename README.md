@@ -6,11 +6,15 @@
 
 ## Abstract
 
-This project develops a statistical boundary-based trading strategy for VN30 futures using rolling z-scores to identify extreme price deviations. The core hypothesis is that significant short-term statistical extremes often lead to large counter-moves that traverse the distribution toward the opposite boundary. By entering positions at extreme z-score levels and exiting at opposing extremes, the strategy seeks to capture full price oscillation cycles. Forced sale scenarios are accounted for by incorporating additional fees into the asset's valuation.
+This project develops a statistical boundary-based trading strategy for VN30 futures using rolling z-scores to identify extreme price deviations. The core hypothesis is that extreme price movements often reflect temporary imbalances rather than lasting trends, and that deeper deviations are more likely to be followed by stronger counter-moves.
+
+The strategy increases position size as the z-score moves further into extreme territory and exits when the price reaches the opposite boundary, aiming to capture full oscillation cycles. Forced sale scenarios are accounted for by incorporating additional fees into the asset's valuation.
 
 ## Introduction
 
-Price movements in VN30 futures exhibit short-term statistical oscillations around a rolling distribution. Extreme deviations, measured via rolling z-scores, often reflect temporary order-flow imbalances. These imbalances may trigger large corrective moves that traverse the distribution toward the opposite boundary. This strategy seeks to capture full oscillatory cycles rather than simple reversion to equilibrium.
+VN30 futures prices frequently fluctuate within short-term statistical ranges. When price moves far from its rolling average, measured by z-score, it may indicate temporary imbalance between buyers and sellers. Larger deviations often lead to stronger corrective movements.
+
+Rather than exiting at the mean, this strategy holds positions until the price travels to the opposite extreme, capturing the full oscillatory movement. Exposure increases when deviations deepen, allowing the strategy to respond proportionally to the strength of the signal while remaining constrained by available capital.
 
 ## Hypothesis
 
