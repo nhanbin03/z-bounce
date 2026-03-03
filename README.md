@@ -31,16 +31,16 @@ where MA is the moving average and STD is the standard deviation over a rolling 
 ## Data
 
 - Data source: Algotrade database
+- Data asset: VN30 Futures (VN30F1M - 1-month contract)
 - Data period: from 2022-01-01 to 2025-04-29
-- Each sell or buy side will be charge 0.4 / 2 fee.
+- Data frequency: 1-minute OHLC (Open, High, Low, Close) data
+- Transaction fee: 0.4 / 2 per side
 
 ### Data collection
 
-#### Daily closing price data
-
-- The daily close price, bid, ask and tick price are collected from Algotrade database using SQL queries.
-- The data is collected using the script `data_loader.py`
-- The data is stored in the `data/is/` and `data/os/` folders.
+- The 1-minute price data is collected from Algotrade database
+- Data is collected using the script `data_loader.py`
+- Data is stored in the `data/is/` folder (in-sample) and `data/os/` folder (out-of-sample)
 
 ## Implementation
 
