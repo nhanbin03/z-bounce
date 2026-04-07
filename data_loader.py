@@ -131,6 +131,8 @@ if __name__ == "__main__":
 
     print("Loading in-sample data")
     load_data(is_from_date, is_to_date, "VN30F1M")
+    load_data(is_from_date, is_to_date, "VN30F2M")
 
     print("Loading out-sample data")
     load_data(os_from_date, os_to_date, "VN30F1M", validation=True)
+    load_data(os_from_date, os_to_date, "VN30F2M", validation=True)

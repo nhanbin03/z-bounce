@@ -61,6 +61,8 @@ class Backtesting:
         self.transactions = []
         self.order_logs = []
 
+        self.trade_count = 0
+
     def move_f1_to_f2(self, f1_price, f2_price):
         """
         TODO: move f1 to f2
@@ -145,10 +147,12 @@ class Backtesting:
                     self.inventory_price * abs(self.inventory) + price
                 ) / (abs(self.inventory) + 1)
                 self.inventory += 1
+                self.trade_count += 1
                 matched += 1
             elif self.bid_price >= price and self.inventory < 0:
                 self.ac_loss += (FEE_PER_CONTRACT - (self.inventory_price - price) * Decimal('100'))
                 self.inventory += 1
+                self.trade_count += 1
                 matched -= 1
 
         if self.ask_price is not None:
@@ -157,10 +161,12 @@ class Backtesting:
                     self.inventory_price * abs(self.inventory) + price
                 ) / (abs(self.inventory) + 1)
                 self.inventory -= 1
+                self.trade_count += 1
                 matched += 1
             elif self.ask_price <= price and self.inventory > 0:
                 self.ac_loss += (FEE_PER_CONTRACT - (price - self.inventory_price) * Decimal('100'))
                 self.inventory -= 1
+                self.trade_count += 1
                 matched -= 1
 
         return matched
@@ -255,6 +261,34 @@ class Backtesting:
         )
         f1_data["ADX_14"] = adx["ADX_14"]
 
+        f2_data = pd.read_csv(f"{prefix_path}VN30F2M_data.csv")
+        f2_data = f2_data[["date", "datetime", "tickersymbol", "close", "dayclose"]].copy()
+        f2_data["datetime"] = pd.to_datetime(
+            f2_data["datetime"], format="%Y-%m-%d %H:%M:%S"
+        )
+        f2_data["date"] = (
+            pd.to_datetime(f2_data["date"], format="%Y-%m-%d").copy().dt.date
+        )
+        f2_data.rename(
+            columns={
+                "close": "f2_close",
+                "dayclose": "f2_dayclose",
+                "tickersymbol": "f2_tickersymbol",
+            },
+            inplace=True,
+        )
+        rounding_columns = ["f2_close", "f2_dayclose"]
+        for col in rounding_columns:
+            f2_data = round_decimal(f2_data, col)
+
+        f1_data = pd.merge(
+            f1_data,
+            f2_data,
+            on=["datetime", "date"],
+            how="outer",
+            sort=True,
+        )
+
         f1_data = f1_data.ffill()
         return f1_data
 
@@ -262,34 +296,38 @@ class Backtesting:
         """
         Main backtesting function
         """
-        # trading_dates = data["date"].unique().tolist()
+        trading_dates = data["date"].unique().tolist()
 
-        # start_date = data["datetime"].iloc[0]
-        # end_date = data["datetime"].iloc[-1]
-        # expiration_dates = get_expired_dates(start_date, end_date)
+        start_date = data["datetime"].iloc[0]
+        end_date = data["datetime"].iloc[-1]
+        expiration_dates = get_expired_dates(start_date, end_date)
 
         cur_index = 0
-        # moving_to_f2 = False
+        moving_to_f2 = False
         for index, row in data.iterrows():
             self.cur_date = row["datetime"]
             self.ticker = row["tickersymbol"]
-            # if (
-            #     cur_index != len(trading_dates) - 1
-            #     and not expiration_dates.empty()
-            #     and trading_dates[cur_index + 1] >= expiration_dates.queue[0]
-            # ):
-            #     self.move_f1_to_f2(row["price"], row["f2_price"])
-            #     expiration_dates.get()
-            #     moving_to_f2 = True
+            if (
+                cur_index != len(trading_dates) - 1
+                and not expiration_dates.empty()
+                and trading_dates[cur_index + 1] >= expiration_dates.queue[0]
+            ):
+                self.move_f1_to_f2(row["close"], row["f2_close"])
+                expiration_dates.get()
+                moving_to_f2 = True
 
-            self.handle_force_sell(row["close"])
-            self.update_bid_ask(row["close"], threshold, row["ADX_14"])
+            self.handle_force_sell(row["f2_close"] if moving_to_f2 else row["close"])
+            self.update_bid_ask(
+                row["f2_close"] if moving_to_f2 else row["close"],
+                threshold,
+                row["ADX_14"]
+            )
             # print(f"Date: {row['date']},  Bid: {self.bid_price}, Ask: {self.ask_price}, Asset: {self.daily_assets[-1]}, Inventory: {self.inventory}, ADX: {row['ADX_14']},")
 
             if index == len(data) - 1 or row["date"] != data.iloc[index + 1]["date"]:
                 cur_index += 1
                 # print(f"Inventory: {self.inventory}, Inventory Price: {self.inventory_price}, AC Loss: {self.ac_loss}")
-                self.update_pnl(row["dayclose"])
+                self.update_pnl(row["f2_dayclose"] if moving_to_f2 else row["dayclose"])
                 
                 if self.printable:
                     print(
@@ -298,7 +336,7 @@ class Backtesting:
                 if index == len(data) - 1 or row["date"].month != data.iloc[index + 1]["date"].month:
                     self.monthly_tracking.append([row["date"], self.daily_assets[-1]])
 
-                # moving_to_f2 = False
+                moving_to_f2 = False
                 self.ac_loss = Decimal("0.0")
                 self.bid_price = None
                 self.ask_price = None
@@ -398,6 +436,7 @@ if __name__ == "__main__":
     print(f"HPR {bt.metric.hpr()}")
     print(f"Monthly return {returns['monthly_return']}")
     print(f"Annual return {returns['annual_return']}")
+    print(f"Total trades: {bt.trade_count}")
 
     bt.plot_hpr()
     bt.plot_drawdown()

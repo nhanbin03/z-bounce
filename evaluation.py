@@ -34,5 +34,6 @@ if __name__ == "__main__":
     print(
         f"Sortino ratio: {bt.metric.sortino_ratio(risk_free_return=Decimal('0.00023')) * Decimal(np.sqrt(250))}"
     )
+    print(f"Total trades: {bt.trade_count}")
     mdd, _ = bt.metric.maximum_drawdown()
     print(f"Maximum drawdown: {mdd}")
