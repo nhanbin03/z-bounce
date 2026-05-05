@@ -2,6 +2,7 @@
 This is main module for strategy backtesting
 """
 
+import os
 import numpy as np
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List
@@ -142,32 +143,42 @@ class Backtesting:
             return matched
 
         if self.bid_price is not None:
-            if self.bid_price >= price and self.inventory >= 0 and placeable > 0:
+            if (
+                self.bid_price >= price 
+                and self.inventory >= 0 
+                and placeable > 0 
+                # and self.inventory < 4
+            ):
                 self.inventory_price = (
                     self.inventory_price * abs(self.inventory) + price
                 ) / (abs(self.inventory) + 1)
                 self.inventory += 1
                 self.trade_count += 1
                 matched += 1
-            elif self.bid_price >= price and self.inventory < 0:
-                self.ac_loss += (FEE_PER_CONTRACT - (self.inventory_price - price) * Decimal('100'))
-                self.inventory += 1
-                self.trade_count += 1
-                matched -= 1
+            elif self.bid_price >= price and self.inventory < 0: # Sell all short position at bid price
+                self.ac_loss += (FEE_PER_CONTRACT - (self.inventory_price - price) * Decimal('100')) * abs(self.inventory)
+                self.trade_count += abs(self.inventory)
+                matched -= abs(self.inventory)
+                self.inventory = 0
 
         if self.ask_price is not None:
-            if self.ask_price <= price and self.inventory <= 0 and placeable > 0:
+            if (
+                self.ask_price <= price 
+                and self.inventory <= 0 
+                and placeable > 0 
+                # and self.inventory > -4
+            ):
                 self.inventory_price = (
                     self.inventory_price * abs(self.inventory) + price
                 ) / (abs(self.inventory) + 1)
                 self.inventory -= 1
                 self.trade_count += 1
                 matched += 1
-            elif self.ask_price <= price and self.inventory > 0:
-                self.ac_loss += (FEE_PER_CONTRACT - (price - self.inventory_price) * Decimal('100'))
-                self.inventory -= 1
-                self.trade_count += 1
-                matched -= 1
+            elif self.ask_price <= price and self.inventory > 0: # Sell all long position at ask price
+                self.ac_loss += (FEE_PER_CONTRACT - (price - self.inventory_price) * Decimal('100')) * abs(self.inventory)
+                self.trade_count += abs(self.inventory)
+                matched -= abs(self.inventory)
+                self.inventory = 0
 
         return matched
 
@@ -198,13 +209,14 @@ class Backtesting:
         variance = sum((price - mean) ** 2 for price in self.price_window) / Decimal(len(self.price_window))
         return Decimal(float(variance) ** 0.5)
 
-    def update_bid_ask(self, price: Decimal, threshold, adx_value):
+    def update_bid_ask(self, price: Decimal, threshold, position_scaling_factor, adx_value):
         """
         Placing bid ask formula based on z-score mean reversion
 
         Args:
             price (Decimal): Current price
             threshold (Decimal): Z-score threshold
+            position_scaling_factor (Decimal): Factor for scaling position size
             adx_value (Decimal): ADX value for trend strength
         """
         # Add current price to window
@@ -214,6 +226,7 @@ class Backtesting:
         
         self.bid_price = None
         self.ask_price = None
+
 
         # Calculate moving average and standard deviation
         mean = self.get_moving_average()
@@ -230,15 +243,30 @@ class Backtesting:
 
         # Calculate z-score
         z = (price - mean) / std
-   
-        if z < -threshold:
-            self.bid_price = price
-        elif z > threshold:
-            self.ask_price = price
+
+        # if pd.notna(adx_value) and adx_value > 70:
+        #     # If ADX indicates a very strong trend, close existing positions
+        #     # if self.inventory > 0:
+        #     #     self.bid_price = price
+        #     # elif self.inventory < 0:
+        #     #     self.ask_price = price
+        #     return
+
+        if pd.notna(adx_value) and adx_value > 40:
+            if z > threshold + max(0, self.inventory) * threshold * position_scaling_factor:
+                self.bid_price = price
+            elif z < -threshold - max(0, -self.inventory) * threshold * position_scaling_factor:
+                self.ask_price = price
+            return
+        if pd.notna(adx_value) and adx_value < 30:
+            if z < -threshold - max(0, self.inventory) * threshold * position_scaling_factor:
+                self.bid_price = price
+            elif z > threshold + max(0, -self.inventory) * threshold * position_scaling_factor:
+                self.ask_price = price
+            return
                 
 
-    @staticmethod
-    def process_data(evaluation=False):
+    def process_data(self, evaluation=False, start_date=None, end_date=None):
         prefix_path = "data/os/" if evaluation else "data/is/"
         f1_data = pd.read_csv(f"{prefix_path}VN30F1M_data.csv")
         f1_data["datetime"] = pd.to_datetime(
@@ -257,9 +285,9 @@ class Backtesting:
             high=float_df["high"],
             low=float_df["low"],
             close=float_df["close"],
-            length=14
+            length=self.window_size,
         )
-        f1_data["ADX_14"] = adx["ADX_14"]
+        f1_data["ADX"] = adx[f"ADX_{self.window_size}"]
 
         f2_data = pd.read_csv(f"{prefix_path}VN30F2M_data.csv")
         f2_data = f2_data[["date", "datetime", "tickersymbol", "close", "dayclose"]].copy()
@@ -290,9 +318,14 @@ class Backtesting:
         )
 
         f1_data = f1_data.ffill()
+
+        if start_date is not None:
+            f1_data = f1_data[f1_data["date"] >= pd.to_datetime(start_date).date()].reset_index(drop=True)
+        if end_date is not None:
+            f1_data = f1_data[f1_data["date"] <= pd.to_datetime(end_date).date()].reset_index(drop=True)
         return f1_data
 
-    def run(self, data: pd.DataFrame, threshold: Decimal):
+    def run(self, data: pd.DataFrame, threshold: Decimal, cut_loss_multiplier: Decimal):
         """
         Main backtesting function
         """
@@ -320,9 +353,9 @@ class Backtesting:
             self.update_bid_ask(
                 row["f2_close"] if moving_to_f2 else row["close"],
                 threshold,
-                row["ADX_14"]
+                cut_loss_multiplier,
+                row["ADX"]
             )
-            # print(f"Date: {row['date']},  Bid: {self.bid_price}, Ask: {self.ask_price}, Asset: {self.daily_assets[-1]}, Inventory: {self.inventory}, ADX: {row['ADX_14']},")
 
             if index == len(data) - 1 or row["date"] != data.iloc[index + 1]["date"]:
                 cur_index += 1
@@ -411,15 +444,102 @@ class Backtesting:
         plt.tight_layout()
         plt.savefig(path, dpi=300, bbox_inches='tight')
 
+    def plot_price_with_z_thresholds(
+        self,
+        data: pd.DataFrame,
+        threshold: Decimal,
+        path="result/backtest/price_with_z_thresholds.svg",
+        date=None,
+        price_col="close",
+    ):
+        """Plot price chart with upper/lower z-threshold lines and ADX."""
+        plot_data = data.copy()
+
+        if date is not None:
+            plot_data = plot_data[plot_data["date"] == date]
+
+        if plot_data.empty:
+            raise ValueError("No data available for plotting. Check date filter.")
+        if price_col not in plot_data.columns:
+            raise ValueError(f"Column '{price_col}' not found in input data.")
+        if "ADX" not in plot_data.columns:
+            raise ValueError("Column 'ADX' not found in input data.")
+
+        x_axis = pd.to_datetime(plot_data["datetime"])
+        price_series = pd.to_numeric(plot_data[price_col], errors="coerce")
+        rolling_mean = price_series.rolling(
+            window=self.window_size,
+            min_periods=self.window_size,
+        ).mean()
+        rolling_std = price_series.rolling(
+            window=self.window_size,
+            min_periods=self.window_size,
+        ).std(ddof=0)
+
+        z_threshold = float(threshold)
+        upper_threshold = rolling_mean + z_threshold * rolling_std
+        lower_threshold = rolling_mean - z_threshold * rolling_std
+        adx_series = pd.to_numeric(plot_data["ADX"], errors="coerce")
+
+        fig, ax_price = plt.subplots(figsize=(12, 6))
+        ax_price.plot(x_axis, price_series, label="Price", color="black", linewidth=1.1)
+        ax_price.plot(
+            x_axis,
+            upper_threshold,
+            label=f"Upper z-threshold (+{z_threshold})",
+            color="red",
+            linestyle="--",
+            linewidth=1.0,
+        )
+        ax_price.plot(
+            x_axis,
+            lower_threshold,
+            label=f"Lower z-threshold (-{z_threshold})",
+            color="blue",
+            linestyle="--",
+            linewidth=1.0,
+        )
+
+        ax_adx = ax_price.twinx()
+        ax_adx.plot(
+            x_axis,
+            adx_series,
+            label="ADX",
+            color="green",
+            linewidth=1.0,
+            alpha=0.85,
+        )
+        ax_adx.axhline(25, color="green", linestyle=":", linewidth=0.9, alpha=0.6)
+
+        ax_price.set_title("Price With Z-Score Threshold Bands and ADX")
+        ax_price.set_xlabel("Datetime")
+        ax_price.set_ylabel("Price")
+        ax_adx.set_ylabel("ADX")
+        ax_price.grid(True, alpha=0.3)
+
+        price_handles, price_labels = ax_price.get_legend_handles_labels()
+        adx_handles, adx_labels = ax_adx.get_legend_handles_labels()
+        ax_price.legend(price_handles + adx_handles, price_labels + adx_labels, loc="best")
+
+        fig.tight_layout()
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+
 
 if __name__ == "__main__":
     bt = Backtesting(
         capital=Decimal("5e5"),
-        window_size=10,
+        window_size=12,
+        # printable=False
     )
 
-    data = bt.process_data()
-    bt.run(data, Decimal("2.5"))
+    data = bt.process_data(
+        # start_date="2022-06-01",
+        # end_date="2022-09-01"
+    )
+    print(data.head())
+    bt.run(data, Decimal("2.5"), Decimal("0.02"))
 
     print(
         f"Sharpe ratio: {bt.metric.sharpe_ratio(risk_free_return=Decimal('0.00023')) * Decimal(np.sqrt(250))}"
@@ -441,3 +561,4 @@ if __name__ == "__main__":
     bt.plot_hpr()
     bt.plot_drawdown()
     bt.plot_inventory()
+    bt.plot_price_with_z_thresholds(data, Decimal("1.5"))

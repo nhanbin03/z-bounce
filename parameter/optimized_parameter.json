@@ -1,4 +1,5 @@
 {
-    "window_size": 16,
-    "threshold": 3.0
+    "window_size": 12,
+    "threshold": 2.5,
+    "position_scaling_factor": 0.02
 }

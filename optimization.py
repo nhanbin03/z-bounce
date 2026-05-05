@@ -4,6 +4,7 @@ Optimization module
 
 import numpy as np
 from decimal import Decimal
+import pandas as pd
 import logging
 import optuna
 from optuna.samplers import TPESampler
@@ -49,8 +50,6 @@ class OptunaCallBack:
 
 
 if __name__ == "__main__":
-    data = Backtesting.process_data()
-
     def objective(trial):
         """
         Sharpe ratio objective function
@@ -69,14 +68,23 @@ if __name__ == "__main__":
         )
 
         bt = Backtesting(capital=Decimal("5e5"), window_size=window_size, printable=False)
+        data = bt.process_data(
+            # end_date="2022-09-01"
+        )
         threshold = trial.suggest_float(
             "threshold",
             OPTIMIZATION_CONFIG["threshold"][0],
             OPTIMIZATION_CONFIG["threshold"][1],
             step=0.1,
         )
+        position_scaling_factor = trial.suggest_float(
+            "position_scaling_factor",
+            OPTIMIZATION_CONFIG["position_scaling_factor"][0],
+            OPTIMIZATION_CONFIG["position_scaling_factor"][1],
+            step=0.01,
+        )
 
-        bt.run(data, Decimal(threshold))
+        bt.run(data, Decimal(threshold), Decimal(position_scaling_factor))
 
         return bt.metric.sharpe_ratio(risk_free_return=Decimal('0.00023')) * Decimal(
             np.sqrt(250)

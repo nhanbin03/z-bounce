@@ -73,7 +73,11 @@ class Metric:
             period_return - risk_free_return for period_return in self.period_returns
         ]
 
-        return np.mean(excess_returns) / np.std(self.period_returns, ddof=1)
+        std = np.std(self.period_returns, ddof=1)
+        if std == 0:
+            return Decimal('inf') if np.mean(excess_returns) > 0 else Decimal('-inf')
+
+        return np.mean(excess_returns) / std
 
     def sortino_ratio(self, risk_free_return: Decimal) -> Decimal:
         """
